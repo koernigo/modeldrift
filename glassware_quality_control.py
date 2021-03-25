@@ -1,4 +1,10 @@
 # Databricks notebook source
+#Note: This demo works with 5.5. LTS ML, mlflow 1.10.0 and seaborn 0.11.1. Make sure these are installed on the cluster
+import mlflow
+print(mlflow.__version__)
+
+# COMMAND ----------
+
 # MAGIC %md 
 # MAGIC # Glassware Quality Control
 
@@ -103,7 +109,7 @@ display(model_df)
 
 mlflow_search_query = "params.model_data_date = '"+ model_data_date['start_date']+ ' - ' + model_data_date['end_date']+"'"
 best_run_details = best_run(mlflow_exp_id, mlflow_search_query)
-
+run_id = best_run_details['runid']
 print("Best run from all trials:" + best_run_details['runid'])
 print("Params:")
 print(best_run_details["params"])
@@ -113,11 +119,58 @@ print(best_run_details["metrics"])
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC __Register the model in the registry and create a new version__
+
+# COMMAND ----------
+
+model_name="Glassware_Model"
+# The default path where the MLflow autologging function stores the Keras model
+artifact_path = "/spark-model"
+model_uri = "runs:/{run_id}/{artifact_path}".format(run_id=run_id, artifact_path=artifact_path)
+print("Model URI: "+model_uri)
+model_details = mlflow.register_model(model_uri=model_uri, name=model_name)
+
+import time
+from mlflow.tracking.client import MlflowClient
+from mlflow.entities.model_registry.model_version_status import ModelVersionStatus
+client = MlflowClient()
+# Wait until the model is ready
+def wait_until_ready(model_name, model_version):
+ 
+  for _ in range(100):
+    model_version_details = client.get_model_version(
+      name=model_name,
+      version=model_version,
+    )
+    status = ModelVersionStatus.from_string(model_version_details.status)
+    print("Model status: %s" % ModelVersionStatus.to_string(status))
+    if status == ModelVersionStatus.READY:
+      break
+    time.sleep(1)
+
+wait_until_ready(model_details.name, model_details.version)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC __Mark the best run as production in MLflow, to be used during scoring__
 
 # COMMAND ----------
 
-push_model_production(mlflow_exp_id, best_run_details['runid'], userid, today_date)
+client.transition_model_version_stage(
+  name=model_details.name,
+  version=model_details.version,
+  stage='Production',
+)
+model_version_details = client.get_model_version(
+  name=model_details.name,
+  version=model_details.version,
+)
+print("The current model stage is: '{stage}'".format(stage=model_version_details.current_stage))
+
+latest_version_info = client.get_latest_versions(model_name, stages=["Production"])
+latest_production_version = latest_version_info[0].version
+print("The latest production version of the model '%s' is '%s'." % (model_name, latest_production_version))
 
 # COMMAND ----------
 
@@ -139,7 +192,14 @@ get_model_production(mlflow_exp_id)
 # COMMAND ----------
 
 sensor_reading_stream = stream_sensor_reading()
+display(sensor_reading_stream)
 predict_stream = stream_score_quality(sensor_reading_stream)
+
+# COMMAND ----------
+
+sql =f"CREATE TABLE IF NOT EXISTS model_drift.predicted_quality USING DELTA LOCATION '{predicted_quality_blob}'"
+print(sql)
+spark.sql(sql)
 
 # COMMAND ----------
 
@@ -154,6 +214,10 @@ predict_stream = stream_score_quality(sensor_reading_stream)
 predicted_quality = get_predicted_quality()
 product_quality = get_product_quality()
 model_quality_summary = track_model_quality(product_quality, predicted_quality)
+
+# COMMAND ----------
+
+model_quality_summary.write.format("delta").mode("overwrite").option("maxRecordsPerFile", 50).saveAsTable("model_drift.model_quality_summary")
 
 # COMMAND ----------
 
@@ -181,6 +245,7 @@ today_date = '2019-07-21 01:00'
 # COMMAND ----------
 
 model_quality_summary = track_model_quality(get_product_quality(), get_predicted_quality())
+model_quality_summary.write.format("delta").mode("overwrite").option("maxRecordsPerFile", 50).saveAsTable("model_drift.model_quality_summary")
 plot_model_quality(model_quality_summary)
 
 # COMMAND ----------
@@ -221,7 +286,7 @@ display(model_df)
 
 mlflow_search_query = "params.model_data_date = '"+ model_data_date['start_date']+ ' - ' + model_data_date['end_date']+"'"
 best_run_details = best_run(mlflow_exp_id, mlflow_search_query)
-
+run_id = best_run_details['runid']
 print("Best run from all trials:" + best_run_details['runid'])
 print("Params:")
 print(best_run_details["params"])
@@ -231,11 +296,31 @@ print(best_run_details["metrics"])
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC __Mark the best run as production in MLflow, to be used during scoring__
+# MAGIC __Create new version of the model and put into production__
 
 # COMMAND ----------
 
-push_model_production(mlflow_exp_id, best_run_details['runid'], userid, today_date)
+model_uri = "runs:/{run_id}/{artifact_path}".format(run_id=run_id, artifact_path=artifact_path)
+print("Model URI: "+model_uri)
+model_details = mlflow.register_model(model_uri=model_uri, name=model_name)
+wait_until_ready(model_details.name, model_details.version)
+
+# COMMAND ----------
+
+client.transition_model_version_stage(
+  name=model_details.name,
+  version=model_details.version,
+  stage='Production',
+)
+model_version_details = client.get_model_version(
+  name=model_details.name,
+  version=model_details.version,
+)
+print("The current model stage is: '{stage}'".format(stage=model_version_details.current_stage))
+
+latest_version_info = client.get_latest_versions(model_name, stages=["Production"])
+latest_production_version = latest_version_info[0].version
+print("The latest production version of the model '%s' is '%s'." % (model_name, latest_production_version))
 
 # COMMAND ----------
 
@@ -256,6 +341,7 @@ predict_stream = stream_score_quality(stream_sensor_reading())
 # COMMAND ----------
 
 model_quality_summary = track_model_quality(get_product_quality(), get_predicted_quality())
+model_quality_summary.write.format("delta").mode("overwrite").option("maxRecordsPerFile", 50).saveAsTable("model_drift.model_quality_summary")
 plot_model_quality(model_quality_summary)
 
 # COMMAND ----------
@@ -267,6 +353,7 @@ plot_model_quality(model_quality_summary)
 # COMMAND ----------
 
 model_quality_summary = track_model_quality(get_product_quality(), get_predicted_quality())
+model_quality_summary.write.format("delta").mode("overwrite").option("maxRecordsPerFile", 50).saveAsTable("model_drift.model_quality_summary")
 plot_model_quality(model_quality_summary)
 
 # COMMAND ----------
@@ -276,21 +363,11 @@ plot_model_quality(model_quality_summary)
 
 # COMMAND ----------
 
+#Please switch to the model UI and transition the latest production model into staging
+
+# COMMAND ----------
+
 predicted_quality = score_quality(get_sensor_reading(), 'd45cd111bc2d49409bb9ccd5df94507d')
 model_quality_summary = track_model_quality(get_product_quality(), predicted_quality)
+model_quality_summary.write.format("delta").mode("overwrite").option("maxRecordsPerFile", 50).saveAsTable("model_drift.model_quality_summary")
 plot_model_quality(model_quality_summary)
-
-# COMMAND ----------
-
-# MAGIC %md ## <a>Summary</a>
-
-# COMMAND ----------
-
-predicted_quality = score_quality(get_sensor_reading(), 'd45cd111bc2d49409bb9ccd5df94507d')
-model_quality_summary_1 = track_model_quality(get_product_quality(), predicted_quality)
-predicted_quality = score_quality(get_sensor_reading(), '34c33e631fd441a9be329a600550f4c1')
-model_quality_summary_2 = track_model_quality(get_product_quality(), predicted_quality)
-
-# COMMAND ----------
-
-plot_summary(model_quality_summary_1, model_quality_summary_2)

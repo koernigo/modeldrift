@@ -16,12 +16,25 @@ import pyspark.sql.functions as F
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC CREATE DATABASE IF NOT EXISTS model_drift;
+# MAGIC USE model_drift;
+
+# COMMAND ----------
+
 def clear_for_demo():
   dbutils.fs.rm(sensor_reading_blob, True)
   dbutils.fs.rm(product_quality_blob, True)
   dbutils.fs.rm(predicted_quality_blob, True)
   dbutils.fs.rm(predicted_quality_cp_blob, True)
   return True
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC DROP TABLE IF EXISTS product_quality;
+# MAGIC DROP TABLE IF EXISTS sensor_reading;
+# MAGIC DROP TABLE IF EXISTS predicted_quality;
 
 # COMMAND ----------
 
@@ -84,6 +97,15 @@ df1.select('pid', 'qualitycheck_time', 'quality').write.format("delta").mode("ov
 
 # COMMAND ----------
 
+sql =f"CREATE TABLE IF NOT EXISTS product_quality USING DELTA LOCATION '{product_quality_blob}'"
+print(sql)
+spark.sql(sql)
+sql =f"CREATE TABLE IF NOT EXISTS sensor_reading USING DELTA LOCATION '{sensor_reading_blob}'"
+print(sql)
+spark.sql(sql)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Append data for range: 2019-07-16 00:00:00 - 2019-07-21 00:00:00
 
@@ -126,6 +148,10 @@ df4 = df.filter(df.timestamp>F.unix_timestamp(F.lit('2019-08-01 00:00:00')).cast
 
 df4.select('pid', 'process_time', 'temp', 'pressure', 'duration').write.format("delta").mode("append").option("maxRecordsPerFile", 50).save(sensor_reading_blob)
 df4.select('pid', 'qualitycheck_time', 'quality').write.format("delta").mode("append").option("maxRecordsPerFile", 50).save(product_quality_blob)
+
+# COMMAND ----------
+
+dbutils.fs.mkdirs(predicted_quality_blob)
 
 # COMMAND ----------
 

@@ -17,7 +17,7 @@ print(best_rf_run["metrics"])
 
 # COMMAND ----------
 
-display(plot_confusion_matrix(best_rf_run['confusion_matrix_uri']))
+#display(plot_confusion_matrix(best_rf_run['confusion_matrix_uri']))
 
 # COMMAND ----------
 
@@ -39,7 +39,7 @@ print(best_dt_run["metrics"])
 
 # COMMAND ----------
 
-display(plot_confusion_matrix(best_dt_run['confusion_matrix_uri']))
+#display(plot_confusion_matrix(best_dt_run['confusion_matrix_uri']))
 
 # COMMAND ----------
 
