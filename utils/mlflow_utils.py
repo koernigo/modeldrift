@@ -86,3 +86,21 @@ def terminate_model_production(runid, userid, end_date):
     return True
   else:
     return False
+
+# COMMAND ----------
+
+import time
+from mlflow.entities.model_registry.model_version_status import ModelVersionStatus
+# Wait until the model is ready
+def wait_until_ready(model_name, model_version):
+ 
+  for _ in range(200):
+    model_version_details = mlflowclient.get_model_version(
+      name=model_name,
+      version=model_version,
+    )
+    status = ModelVersionStatus.from_string(model_version_details.status)
+    print("Model status: %s" % ModelVersionStatus.to_string(status))
+    if status == ModelVersionStatus.READY:
+      break
+    time.sleep(1)

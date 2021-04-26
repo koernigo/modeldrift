@@ -124,30 +124,11 @@ print(best_run_details["metrics"])
 # COMMAND ----------
 
 model_name="Glassware_Model"
-# The default path where the MLflow autologging function stores the Keras model
+# The default path where the MLflow autologging function stores the spark-ml model
 artifact_path = "/spark-model"
 model_uri = "runs:/{run_id}/{artifact_path}".format(run_id=run_id, artifact_path=artifact_path)
 print("Model URI: "+model_uri)
 model_details = mlflow.register_model(model_uri=model_uri, name=model_name)
-
-import time
-from mlflow.tracking.client import MlflowClient
-from mlflow.entities.model_registry.model_version_status import ModelVersionStatus
-client = MlflowClient()
-# Wait until the model is ready
-def wait_until_ready(model_name, model_version):
- 
-  for _ in range(100):
-    model_version_details = client.get_model_version(
-      name=model_name,
-      version=model_version,
-    )
-    status = ModelVersionStatus.from_string(model_version_details.status)
-    print("Model status: %s" % ModelVersionStatus.to_string(status))
-    if status == ModelVersionStatus.READY:
-      break
-    time.sleep(1)
-
 wait_until_ready(model_details.name, model_details.version)
 
 # COMMAND ----------
@@ -157,6 +138,7 @@ wait_until_ready(model_details.name, model_details.version)
 
 # COMMAND ----------
 
+client = mlflowclient
 client.transition_model_version_stage(
   name=model_details.name,
   version=model_details.version,
@@ -194,6 +176,10 @@ get_model_production(mlflow_exp_id)
 sensor_reading_stream = stream_sensor_reading()
 display(sensor_reading_stream)
 predict_stream = stream_score_quality(sensor_reading_stream)
+
+# COMMAND ----------
+
+predict_stream.get_status()
 
 # COMMAND ----------
 
